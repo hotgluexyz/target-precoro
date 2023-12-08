@@ -12,7 +12,6 @@ class Payments(PrecoroSink):
     def preprocess_record(self, record: dict, context: dict) -> None:
         """Process the record."""
         payload = {
-            "id": record.get("externalId"),
             "invoice[id]": record.get("invoiceNumber"),
             "sumPaid": record.get("amount"),
             "payDate": record.get("payDate"),
