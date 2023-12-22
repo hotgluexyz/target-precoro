@@ -7,11 +7,7 @@ from singer_sdk.sinks import Sink
 from target_hotglue.target import TargetHotglue
 
 from target_precoro.sinks import (
-    ItemCustomFieldsOptions,
-    Items,
-    Payments,
-    Suppliers,
-    Taxes,
+    FallbackSink
 )
 
 
@@ -19,7 +15,7 @@ class TargetPrecoro(TargetHotglue):
     """Sample target for Precoro."""
 
     name = "target-precoro"
-    SINK_TYPES = [Payments, Taxes, Items, Suppliers, ItemCustomFieldsOptions]
+    SINK_TYPES = [FallbackSink]
     config_jsonschema = th.PropertiesList(
         th.Property("auth_token", th.StringType, required=True),
         th.Property("email", th.StringType, required=True),
@@ -27,10 +23,7 @@ class TargetPrecoro(TargetHotglue):
 
     def get_sink_class(self, stream_name: str) -> Type[Sink]:
         for sink_class in self.SINK_TYPES:
-            if stream_name == sink_class.name:
-                return sink_class
-        return ItemCustomFieldsOptions
-
+            return FallbackSink
 
 if __name__ == "__main__":
     TargetPrecoro.cli()

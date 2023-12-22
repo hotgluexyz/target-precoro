@@ -18,19 +18,6 @@ class PrecoroSink(HotglueSink):
         }
         return auth_credentials
 
-    def upsert_record(self, record: dict, context: dict):
-        state_updates = dict()
-        method = "POST"
-        endpoint = self.endpoint
-        if record:
-            id = record.get("id")
-            if id:
-                method = "PUT"
-                endpoint = f"{endpoint}/{id}"
-            response = self.request_api(method, endpoint=endpoint, request_data=record)
-            id = response.json()["id"]
-            return id, True, state_updates
-
     @backoff.on_exception(
         backoff.expo,
         (RetriableAPIError, requests.exceptions.ReadTimeout),
@@ -51,9 +38,3 @@ class PrecoroSink(HotglueSink):
         )
         self.validate_response(response)
         return response
-
-    def map_custom_fields(self, record, payload):
-        custom_fields = record.get("customFields")
-        if custom_fields:
-            [payload.update({cf.get("name"): cf.get("value")}) for cf in custom_fields]
-        return payload
