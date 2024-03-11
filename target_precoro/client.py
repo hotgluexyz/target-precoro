@@ -6,8 +6,14 @@ from target_hotglue.client import HotglueSink
 
 class PrecoroSink(HotglueSink):
 
-    base_url = "https://api.precoro.com"
     item_custom_fields = {}
+
+    @property
+    def base_url(self) -> str:
+        url = self.config.get("base_url", "https://api.precoro.com")
+        if not url.startswith("https://"):
+            url = f"https://{url}"
+        return url
 
     @property
     def http_headers(self):
