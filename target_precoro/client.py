@@ -44,47 +44,4 @@ class PrecoroSink(HotglueSink):
         )
         self.validate_response(response)
         return response
-    
-    def process_record(self, record: dict, context: dict) -> None:
-        """Process the record."""
-        if not self.latest_state:
-            self.init_state()
 
-        hash = self.build_record_hash(record)
-
-        existing_state =  self.get_existing_state(hash)
-
-        if existing_state:
-            return self.update_state(existing_state, is_duplicate=True)
-
-        state = {"hash": hash}
-
-        id = None
-        success = False
-        state_updates = dict()
-
-        # paymentterms in Precoro has a field called externalId, so we're sending this in the payload
-        if self.name != "paymentterms":
-            external_id = record.pop("externalId", None)
-
-        try:
-            id, success, state_updates = self.upsert_record(record, context)
-        except Exception as e:
-            self.logger.exception(f"Upsert record error {str(e)}")
-            state_updates['error'] = str(e)
-
-        if success:
-            self.logger.info(f"{self.name} processed id: {id}")
-
-        state["success"] = success
-
-        if id:
-            state["id"] = id
-
-        if not success and external_id:
-            state["externalId"] = external_id
-
-        if state_updates and isinstance(state_updates, dict):
-            state = dict(state, **state_updates)
-
-        self.update_state(state)
