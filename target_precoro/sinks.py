@@ -29,8 +29,9 @@ class FallbackSink(PrecoroSink):
                 else:
                     raise Exception("No custom field id provided for the record")
             # post or put record
-            id = record.get("id")
+            id = record.pop("id", None)
             if id:
+                id = int(id)
                 method = "PUT"
                 endpoint = f"{endpoint}/{id}"
             response = self.request_api(method, endpoint=endpoint, request_data=record)
