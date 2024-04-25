@@ -10,7 +10,7 @@ class PrecoroSink(HotglueSink):
 
     @property
     def base_url(self) -> str:
-        url = self.config.get("base_url", "https://api.precoro.com")
+        url = self.config.get("base_url") or "https://api.precoro.com"
         if not url.startswith("https://"):
             url = f"https://{url}"
         return url
