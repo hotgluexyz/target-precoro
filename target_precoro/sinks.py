@@ -35,5 +35,9 @@ class FallbackSink(PrecoroSink):
                 method = "PUT"
                 endpoint = f"{endpoint}/{id}"
             response = self.request_api(method, endpoint=endpoint, request_data=record)
-            id = response.json()["id"]
+            # if invoice is fully paid return a dummy id so the job doesn't fail
+            if self.is_invoice_paid:
+                id = "000000"
+            else:
+                id = response.json()["id"]
             return id, True, state_updates
