@@ -8,6 +8,7 @@ class PrecoroSink(HotglueSink):
 
     item_custom_fields = {}
     is_invoice_paid = False
+    allows_externalid = ["suppliers", "items", "itemcustomfields", "documentcustomfields", "payments"]
 
     @property
     def base_url(self) -> str:
@@ -89,3 +90,48 @@ class PrecoroSink(HotglueSink):
                 self.latest_state["summary"][self.name] = {"success": 0, "fail": 0, "existing": 0, "updated": 0}
 
             self.summary_init = True
+    
+    def process_record(self, record: dict, context: dict) -> None:
+        """Process the record."""
+        if not self.latest_state:
+            self.init_state()
+
+        hash = self.build_record_hash(record)
+
+        existing_state =  self.get_existing_state(hash)
+
+        if existing_state:
+            return self.update_state(existing_state, is_duplicate=True)
+
+        state = {"hash": hash}
+
+        id = None
+        success = False
+        state_updates = dict()
+
+        if self.name in self.allows_externalid:
+            external_id = record.get("externalId")
+        else:
+            external_id = record.pop("externalId", None)
+
+        try:
+            id, success, state_updates = self.upsert_record(record, context)
+        except Exception as e:
+            self.logger.exception(f"Upsert record error {str(e)}")
+            state_updates['error'] = str(e)
+
+        if success:
+            self.logger.info(f"{self.name} processed id: {id}")
+
+        state["success"] = success
+
+        if id:
+            state["id"] = id
+
+        if external_id:
+            state["externalId"] = external_id
+
+        if state_updates and isinstance(state_updates, dict):
+            state = dict(state, **state_updates)
+
+        self.update_state(state)
