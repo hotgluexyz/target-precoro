@@ -24,6 +24,21 @@ class PrecoroSink(HotglueSink):
             "Content-Type": "application/x-www-form-urlencoded",
         }
         return auth_credentials
+    
+    @property
+    def allows_externalid(self) -> list:
+        allows_externalid = self.config.get("allows_externalid", [])
+        if allows_externalid:
+            if isinstance(allows_externalid, str):
+                allows_externalid = allows_externalid.split(",")
+                allows_externalid = [stream.lower() for stream in allows_externalid]
+                allows_externalid = [stream.strip() for stream in allows_externalid]
+            elif isinstance(allows_externalid, list):
+                allows_externalid = [stream.lower() for stream in allows_externalid]
+                allows_externalid = [stream.strip() for stream in allows_externalid]
+            else:
+                raise Exception(f"allows_externalid value in config is not valid, it should be a list of streams or a string of streams separated by a comma.")
+        return allows_externalid
 
     @backoff.on_exception(
         backoff.expo,
