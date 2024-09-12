@@ -11,15 +11,43 @@ class FallbackSink(PrecoroSink):
     @property
     def name(self):
         return self.stream_name
+    
+    def get_default_values(self):
+        res = {}
+        default_values = self.config.get("default_values", [])
+        # keep only values for current sink
+        sink_default_values = [value for value in default_values if value.get("stream","").lower() == self.name]
+        if sink_default_values:
+            for value in sink_default_values:
+                field = value.get("field")
+                val = value.get("value")
+                val_type = value.get("type")
+                if field and val and val_type:
+                    if val_type == "int":
+                        val = int(val)
+                    elif val_type == "float":
+                        val = float(val)
+                    elif val_type in ["bool", "boolean"]:
+                        val = bool(val_type)
+                    res[field] = val
+        return res
 
     def preprocess_record(self, record: dict, context: dict) -> None:
         """Process the record."""
-        return record
+        try:
+            # get default values from config
+            default_fields = self.get_default_values()
+            record.update(default_fields)
+            return record
+        except Exception as e:
+            return {"error": f"Failed during preprocessing record with error: {str(e)}"}
 
     def upsert_record(self, record: dict, context: dict):
         state_updates = dict()
         method = "POST"
         endpoint = self.endpoint
+        if record.get("error"):
+            raise Exception(record.get("error"))
         if record:
             # if record is a custom field
             if self.name in ["itemcustomfields", "documentcustomfields"]:
