@@ -25,20 +25,19 @@ class PrecoroSink(HotglueSink):
         }
         return auth_credentials
     
-    @property
-    def allows_externalid(self) -> list:
-        allows_externalid = self.config.get("allows_externalid", [])
-        if allows_externalid:
-            if isinstance(allows_externalid, str):
-                allows_externalid = allows_externalid.split(",")
-                allows_externalid = [stream.lower() for stream in allows_externalid]
-                allows_externalid = [stream.strip() for stream in allows_externalid]
-            elif isinstance(allows_externalid, list):
-                allows_externalid = [stream.lower() for stream in allows_externalid]
-                allows_externalid = [stream.strip() for stream in allows_externalid]
-            else:
-                raise Exception(f"allows_externalid value in config is not valid, it should be a list of streams or a string of streams separated by a comma.")
-        return allows_externalid
+    allows_externalid = [
+        "suppliers",
+        "invoices",
+        "purchaseorders",
+        "payments",
+        "taxes",
+        "paymentterms",
+        "itemcustomfields",
+        "documentcustomfields",
+        "items",
+        "locations",
+        "legalentities",
+    ]
 
     @backoff.on_exception(
         backoff.expo,
@@ -47,7 +46,7 @@ class PrecoroSink(HotglueSink):
         factor=2,
     )
     def _request(
-        self, http_method, endpoint, params={}, request_data=None, headers={}
+        self, http_method, endpoint, params={}, request_data=None, headers={}, verify=True
     ) -> requests.PreparedRequest:
         """Prepare a request object."""
         url = self.url(endpoint)
@@ -56,7 +55,7 @@ class PrecoroSink(HotglueSink):
         data = request_data
 
         response = requests.request(
-            method=http_method, url=url, params=params, headers=headers, data=data
+            method=http_method, url=url, params=params, headers=headers, data=data, verify=verify
         )
         self.validate_response(response)
         # if error is due to invoice fully paid, log the invoice is paid
