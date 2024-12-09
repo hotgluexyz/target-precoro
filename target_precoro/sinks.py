@@ -62,6 +62,7 @@ class FallbackSink(PrecoroSink):
             if self.name in ["itemcustomfields", "documentcustomfields"]:
                 custom_field_id = record.pop("custom_field_id", None)
                 if custom_field_id:
+                    custom_field_id = str(int(custom_field_id)) if isinstance(custom_field_id, float) else str(custom_field_id)
                     base_endpoint = self.endpoint.replace(
                         "custom_field_id", custom_field_id
                     )
