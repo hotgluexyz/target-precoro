@@ -80,10 +80,12 @@ class FallbackSink(PrecoroSink):
                 id = "000000"
             else:
                 id = response.json()["id"]
+                idn = response.json().get("idn")
             # patch record with externalId
             if externalId and id != "000000":
                 try:
-                    externalid_endpoint = f"{base_endpoint}/{id}"
+                    pk = idn if self.name in ["invoices", "purchaseorders", "payments"] else id
+                    externalid_endpoint = f"{base_endpoint}/{pk}"
                     external_id_payload = {"externalId": externalId}
                     headers = {"Content-Type": "application/x-www-form-urlencoded"}
                     response = self.request_api(
@@ -94,7 +96,7 @@ class FallbackSink(PrecoroSink):
                     )
                 except Exception as e:
                     raise Exception(
-                        f"Failed while trying to send externalId {externalId}"
-                    ) from e
+                        f"Failed while trying to send externalId {externalId}, error: {e}"
+                    )
 
             return id, True, state_updates
