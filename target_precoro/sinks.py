@@ -53,7 +53,6 @@ class FallbackSink(PrecoroSink):
         state_updates = dict()
         method = "POST"
         base_endpoint = self.endpoint
-        endpoint = self.endpoint
         if record.get("error"):
             raise Exception(record.get("error"))
         if record:
@@ -68,6 +67,7 @@ class FallbackSink(PrecoroSink):
                     )
                 else:
                     raise Exception("No custom field id provided for the record")
+            endpoint = base_endpoint
             # post or put record
             id = record.pop("id", None)
             if id:
