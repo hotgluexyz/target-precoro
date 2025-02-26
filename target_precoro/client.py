@@ -1,5 +1,7 @@
 import backoff
 import requests
+import time
+from datetime import datetime, timezone
 from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 from target_hotglue.client import HotglueSink
 
@@ -39,11 +41,24 @@ class PrecoroSink(HotglueSink):
         "legalentities",
     ]
 
+    def _handle_rate_limit(self, response):
+        """Extracts RateLimit-Retry-After and sleeps until that time."""
+        retry_after_str = response.json().get("RateLimit-Retry-After")
+        if retry_after_str:
+            retry_after_time = datetime.strptime(retry_after_str, "%Y-%m-%d %H:%M:%S %Z")
+            retry_after_timestamp = retry_after_time.replace(tzinfo=timezone.utc).timestamp()
+            current_timestamp = time.time()
+
+            wait_time = retry_after_timestamp - current_timestamp
+            if wait_time > 0:
+                self.logger.info(f"Rate limit hit. Waiting for {wait_time:.2f} seconds until {retry_after_time}.")
+                time.sleep(wait_time)
+
     @backoff.on_exception(
         backoff.expo,
         (RetriableAPIError, requests.exceptions.ReadTimeout),
-        max_tries=5,
-        factor=2,
+        max_tries=7,
+        factor=3,
     )
     def _request(
         self, http_method, endpoint, params={}, request_data=None, headers={}, verify=True
@@ -54,9 +69,22 @@ class PrecoroSink(HotglueSink):
         params.update(self.params)
         data = request_data
 
+        # forcing an error to test backoff
+        # raise RetriableAPIError("Forcing a 429 error to test backoff behavior")
+
         response = requests.request(
             method=http_method, url=url, params=params, headers=headers, data=data, verify=verify
         )
+
+        if response.status_code == 429:
+            self.logger.warning("Received 429 Too Many Requests error")
+            self.logger.warning(f"Response Headers: {response.headers}")
+            self.logger.warning(f"Response Body: {response.text}")
+
+            self._handle_rate_limit(response) 
+
+            return self._request(http_method, endpoint, params, request_data, headers, verify)
+        
         self.validate_response(response)
         # if error is due to invoice fully paid, log the invoice is paid
         if self.is_invoice_paid:
@@ -103,3 +131,4 @@ class PrecoroSink(HotglueSink):
                 self.latest_state["summary"][self.name] = {"success": 0, "fail": 0, "existing": 0, "updated": 0}
 
             self.summary_init = True
+
