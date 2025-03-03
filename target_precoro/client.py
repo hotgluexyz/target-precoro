@@ -42,7 +42,12 @@ class PrecoroSink(HotglueSink):
     ]
 
     def _handle_rate_limit(self, response):
-        """Extracts RateLimit-Retry-After and sleeps until that time."""
+        """Extracts RateLimit-Retry-After and handles rate limit based on type."""
+        rate_limit_type = response.json().get("RateLimit-Type")
+        if rate_limit_type == "Daily limiter":
+            self.logger.error("Daily rate limit hit. Exiting.")
+            raise FatalAPIError("Daily rate limit hit. Exiting.")
+        
         retry_after_str = response.json().get("RateLimit-Retry-After")
         if retry_after_str:
             retry_after_time = datetime.strptime(retry_after_str, "%Y-%m-%d %H:%M:%S %Z")
@@ -50,6 +55,7 @@ class PrecoroSink(HotglueSink):
             current_timestamp = time.time()
 
             wait_time = retry_after_timestamp - current_timestamp
+
             if wait_time > 0:
                 self.logger.info(f"Rate limit hit. Waiting for {wait_time:.2f} seconds until {retry_after_time}.")
                 time.sleep(wait_time)
