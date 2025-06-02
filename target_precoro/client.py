@@ -62,7 +62,7 @@ class PrecoroSink(HotglueSink):
 
     @backoff.on_exception(
         backoff.expo,
-        (RetriableAPIError, requests.exceptions.ReadTimeout),
+        (RetriableAPIError, requests.exceptions.RequestException),
         max_tries=7,
         factor=3,
     )
