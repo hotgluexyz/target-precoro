@@ -138,3 +138,51 @@ class PrecoroSink(HotglueSink):
 
             self.summary_init = True
 
+
+    def get_default_values(self):
+        res = {}
+        default_values = self.config.get("default_values", [])
+        # keep only values for current sink
+        sink_default_values = [value for value in default_values if value.get("stream","").lower() == self.name]
+        if sink_default_values:
+            for value in sink_default_values:
+                field = value.get("field")
+                val = value.get("value")
+                val_type = value.get("type")
+                if field and val and val_type:
+                    if val_type == "int":
+                        val = int(val)
+                    elif val_type == "float":
+                        val = float(val)
+                    elif val_type in ["bool", "boolean"]:
+                        val = bool(val_type)
+                    res[field] = val
+        return res
+    
+    def preprocess_record(self, record: dict, context: dict) -> None:
+        """Process the record."""
+        try:
+            # get default values from config
+            default_fields = self.get_default_values()
+            record.update(default_fields)
+            return record
+        except Exception as e:
+            return {"error": f"Failed during preprocessing record with error: {str(e)}"}
+        
+    def patch_external_id(self, pk, base_endpoint,externalId):
+        if externalId and pk != "000000":
+            try:
+                externalid_endpoint = f"{base_endpoint}/{pk}"
+                external_id_payload = {"externalId": externalId}
+                headers = {"Content-Type": "application/x-www-form-urlencoded"}
+                response = self.request_api(
+                    "PATCH",
+                    endpoint=externalid_endpoint,
+                    request_data=external_id_payload,
+                    headers=headers,
+                )
+            except Exception as e:
+                raise Exception(
+                    f"Failed while trying to send externalId {externalId}, error: {e}"
+                )
+
