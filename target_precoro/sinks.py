@@ -119,6 +119,7 @@ class FallbackSink(PrecoroSink):
             # if invoice is fully paid return a dummy id so the job doesn't fail
             if self.is_invoice_paid:
                 id = "000000"
+                return id, True, state_updates
             else:
                 id = response.json()["id"]
                 idn = response.json().get("idn")
