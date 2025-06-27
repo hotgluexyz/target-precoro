@@ -48,6 +48,10 @@ class PrecoroSink(HotglueSink):
             self.logger.error("Daily rate limit hit. Exiting.")
             raise FatalAPIError("Daily rate limit hit. Exiting.")
         
+        if rate_limit_type == "Hourly limiter":
+            self.logger.info(f"Hourly rate limit hit. Waiting for 3600 seconds.")
+            time.sleep(3600)
+        
         retry_after_str = response.json().get("RateLimit-Retry-After")
         if retry_after_str:
             retry_after_time = datetime.strptime(retry_after_str, "%Y-%m-%d %H:%M:%S %Z")
@@ -88,8 +92,6 @@ class PrecoroSink(HotglueSink):
             self.logger.warning(f"Response Body: {response.text}")
 
             self._handle_rate_limit(response) 
-
-            return self._request(http_method, endpoint, params, request_data, headers, verify)
         
         self.validate_response(response)
         # if error is due to invoice fully paid, log the invoice is paid
