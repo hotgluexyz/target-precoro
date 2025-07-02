@@ -90,6 +90,20 @@ class FallbackSink(PrecoroSink):
     def name(self):
         return self.stream_name
 
+    def check_and_fix_payment_amount(self, record: dict):
+        """
+            HGI-8258: fix payment amount if it's within 0.01 of the remaining amount
+        """
+        response = self.request_api("GET", endpoint=f"/invoices?id={record.get('invoice[id]')}")
+        invoices = response.json().get("data", [])
+        if len(invoices) == 0:
+            raise Exception(f"Invoice {record.get('invoice[id]')} not found")
+        
+        invoice = invoices[0]
+        remaining_amount = invoice.get("sum", 0) - float(invoice.get("sumPaid", 0))
+        if abs(round(remaining_amount - record.get("sumPaid"))) <= 0.01:
+            record["sumPaid"] = remaining_amount
+
     def upsert_record(self, record: dict, context: dict):
         state_updates = dict()
         method = "POST"
@@ -108,6 +122,9 @@ class FallbackSink(PrecoroSink):
                     )
                 else:
                     raise Exception("No custom field id provided for the record")
+            if self.name == "payments":
+                self.check_and_fix_payment_amount(record)
+
             endpoint = base_endpoint
             # post or put record
             id = record.pop("id", None)
