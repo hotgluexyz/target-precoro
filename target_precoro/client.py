@@ -92,7 +92,10 @@ class PrecoroSink(HotglueSink):
             self.logger.warning(f"Response Body: {response.text}")
 
             self._handle_rate_limit(response) 
-        
+        else:
+            # we sleep for 1 second because that's their API rate limit
+            time.sleep(1)
+
         self.validate_response(response)
         # if error is due to invoice fully paid, log the invoice is paid
         if self.is_invoice_paid:
