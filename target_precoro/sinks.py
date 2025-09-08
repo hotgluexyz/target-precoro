@@ -30,7 +30,7 @@ class ItemCustomFieldsSink(PrecoroSink):
                 record["parent[id]"] = parentId
                 record.pop("parentExternalId", None)
             else:
-                raise Exception(f"Parent {parentExternalId} not found")
+                return {"error": f"Parent {parentExternalId} not found"}
         return record
         
     
