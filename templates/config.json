@@ -1,0 +1,31 @@
+{
+  "auth_token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "email": "user@example.com",
+  "base_url": "https://api.precoro.com",
+  "default_values": [
+    {
+      "stream": "invoices",
+      "field": "status",
+      "value": "draft",
+      "type": "string"
+    },
+    {
+      "stream": "purchaseorders",
+      "field": "quantity",
+      "value": "1",
+      "type": "int"
+    }
+  ],
+  "only_update_existing_records": [
+    {
+      "table": "items",
+      "is_icf": false,
+      "is_dcf": false
+    },
+    {
+      "table": "field name",
+      "is_icf": true,
+      "is_dcf": false
+    }
+  ]
+}
