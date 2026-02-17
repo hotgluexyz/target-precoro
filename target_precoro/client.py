@@ -60,10 +60,13 @@ class PrecoroSink(HotglueSink):
         """True if this stream/record is in only_update_existing_records (skip new POSTs).
         Regular streams: table matches stream name. ICF/DCF: table is custom field name (resolved via API).
         """
+        entries = self._only_update_entries()
+        if not entries:
+            return False
+
         def _normalize(s: str) -> str:
             return (s or "").strip().lower()
 
-        entries = self._only_update_entries()
         stream_norm = _normalize(self.stream_name or getattr(self, "name", ""))
 
         if custom_field_id is not None and (is_icf or is_dcf):
