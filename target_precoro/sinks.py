@@ -1,10 +1,6 @@
 """Precoro target sink class, which handles writing streams."""
 
 from target_precoro.client import PrecoroSink
-from typing import Dict, List, Optional
-from singer_sdk.plugin_base import PluginBase
-
-
 
 
 class ItemCustomFieldsSink(PrecoroSink):
@@ -44,7 +40,6 @@ class ItemCustomFieldsSink(PrecoroSink):
         if record:
             externalId = record.pop("externalId", None)
 
-            
             custom_field_id = record.pop("custom_field_id", None)
             if custom_field_id:
                 custom_field_id = str(int(custom_field_id)) if isinstance(custom_field_id, float) else str(custom_field_id)
@@ -55,8 +50,13 @@ class ItemCustomFieldsSink(PrecoroSink):
                 raise Exception("No custom field id provided for the record")
             
             endpoint = base_endpoint
-            # post or put record
+            # Skip new records when only_update_existing_records applies
             id = record.pop("id", None)
+            if not id and self.is_only_update_existing_records(
+                is_icf=True, is_dcf=False, custom_field_id=custom_field_id
+            ):
+                state_updates["skipped"] = True
+                return None, True, state_updates
             if id:
                 id = int(id)
                 method = "PUT"
@@ -112,7 +112,7 @@ class FallbackSink(PrecoroSink):
             raise Exception(record.get("error"))
         if record:
             externalId = record.pop("externalId", None)
-            # if record is a custom field
+            custom_field_id = None
             if self.name == "documentcustomfields":
                 custom_field_id = record.pop("custom_field_id", None)
                 if custom_field_id:
@@ -122,12 +122,21 @@ class FallbackSink(PrecoroSink):
                     )
                 else:
                     raise Exception("No custom field id provided for the record")
+
+            # Skip new records when only_update_existing_records applies
+            id = record.pop("id", None)
+            if not id and self.is_only_update_existing_records(
+                is_icf=False,
+                is_dcf=(self.name == "documentcustomfields"),
+                custom_field_id=custom_field_id if self.name == "documentcustomfields" else None,
+            ):
+                state_updates["skipped"] = True
+                return None, True, state_updates
+
             if self.name == "payments":
                 self.check_and_fix_payment_amount(record)
 
             endpoint = base_endpoint
-            # post or put record
-            id = record.pop("id", None)
             if id:
                 id = int(id)
                 method = "PUT"

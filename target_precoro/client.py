@@ -27,6 +27,63 @@ class PrecoroSink(HotglueSink):
         }
         return auth_credentials
     
+    def _only_update_entries(self):
+        """Config entries for only_update_existing_records (single source of truth)."""
+        return self.config.get("only_update_existing_records") or []
+
+    def _fetch_custom_field_list(self, endpoint: str, cache_attr: str) -> dict:
+        """Fetch id -> name map from endpoint. Cached on target."""
+        target = getattr(self, "_target", None)
+        cached = getattr(target, cache_attr, None) if target else None
+        if cached is not None:
+            return cached
+        data = self.request_api("GET", endpoint=endpoint).json().get("data", [])
+        id_to_name = {str(i["id"]): (i.get("name") or i.get("title") or "").strip() for i in data if i.get("id") is not None}
+        if target is not None:
+            setattr(target, cache_attr, id_to_name)
+        return id_to_name
+
+    def _get_cf_id_to_name(self, is_icf: bool) -> dict:
+        """Id -> name for item or document custom fields; fetches only if config needs it."""
+        entries = self._only_update_entries()
+        need = any(e.get("is_icf") for e in entries) if is_icf else any(e.get("is_dcf") for e in entries)
+        if not need:
+            return {}
+        return self._fetch_custom_field_list(
+            "/itemcustomfields" if is_icf else "/documentcustomfields",
+            "_icf_id_to_name" if is_icf else "_dcf_id_to_name",
+        )
+
+    def is_only_update_existing_records(
+        self, is_icf: bool = False, is_dcf: bool = False, custom_field_id: str = None
+    ) -> bool:
+        """True if this stream/record is in only_update_existing_records (skip new POSTs).
+        Regular streams: table matches stream name. ICF/DCF: table is custom field name (resolved via API).
+        """
+        entries = self._only_update_entries()
+        if not entries:
+            return False
+
+        def _normalize(s: str) -> str:
+            return (s or "").strip().lower()
+
+        stream_norm = _normalize(self.stream_name or getattr(self, "name", ""))
+
+        if custom_field_id is not None and (is_icf or is_dcf):
+            id_to_name = self._get_cf_id_to_name(is_icf)
+            match_name = _normalize(id_to_name.get(str(custom_field_id)))
+            if not match_name:
+                return False
+        else:
+            match_name = stream_norm
+
+        for e in entries:
+            if e.get("is_dcf") != is_dcf or e.get("is_icf") != is_icf:
+                continue
+            if _normalize(e.get("table")) == match_name:
+                return True
+        return False
+
     allows_externalid = [
         "suppliers",
         "invoices",
