@@ -11,6 +11,56 @@ class PrecoroSink(HotglueSink):
     item_custom_fields = {}
     is_invoice_paid = False
 
+    ENTITY_TYPE_MAP = {
+        "suppliers": 1,
+        # TODO: Add other streams types
+    }
+
+    def _get_account_setup_map_field(self, record: dict) -> str:
+        """Helper to extract mapField (e.g. uniqueCode, code) based on stream."""
+        return record.get("uniqueCode") or record.get("code")
+
+    def hit_account_setup_search(self, integration_id: str, record: dict, legal_entity_id) -> dict:
+        account_setup = self.config.get("AccountSetup", {})
+        base_url = account_setup.get("url", "").rstrip("/")
+        if not base_url:
+            self.logger.warning("AccountSetup URL is not configured.")
+            return None
+        
+        payload = {
+            "legalEntityId": legal_entity_id,
+            "entityType": self.ENTITY_TYPE_MAP.get(self.name, 1),
+            "integrationType": account_setup.get("integrationType"),
+            "integrationId": integration_id,
+            "name": record.get("name"),
+            "mapField": self._get_account_setup_map_field(record)
+        }
+        
+        url = f"{base_url}/api/hotglue/account_setup/search"
+        self.logger.info(f"POST {url} with payload: {payload}")
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        return response.json()
+
+    def hit_account_setup_patch(self, as_external_id: str, precoro_id, record: dict) -> dict:
+        account_setup = self.config.get("AccountSetup", {})
+        base_url = account_setup.get("url", "").rstrip("/")
+        if not base_url:
+            self.logger.warning("AccountSetup URL is not configured (Patch).")
+            return None
+            
+        payload = {
+            "entityId": precoro_id,
+            "name": record.get("name"),
+            "mapField": self._get_account_setup_map_field(record)
+        }
+        
+        url = f"{base_url}/api/hotglue/account_setup/{as_external_id}"
+        self.logger.info(f"PATCH {url} with payload: {payload}")
+        response = requests.patch(url, json=payload, timeout=15)
+        response.raise_for_status()
+        return response.json()
+
     @property
     def base_url(self) -> str:
         url = self.config.get("base_url") or "https://api.precoro.com"
