@@ -112,6 +112,22 @@ class FallbackSink(PrecoroSink):
             raise Exception(record.get("error"))
         if record:
             externalId = record.pop("externalId", None)
+            legalEntityId = record.pop("legalEntityId", None)
+            account_setup_enabled = self.config.get("AccountSetup", {}).get("enabled", False)
+            account_setup_ref_id = None
+            
+            if account_setup_enabled and externalId:
+                try:
+                    search_resp = self.hit_account_setup_search(externalId, record, legalEntityId)
+                    if search_resp and search_resp.get("isSuccess"):
+                        account_setup_ref_id = search_resp.get("externalId")
+                        precoro_id = search_resp.get("precoroId")
+                        if precoro_id:
+                            # if Precoro record exists, we tell target it's an update (PUT)
+                            record["id"] = str(precoro_id)
+                except Exception as e:
+                    self.logger.error(f"AccountSetup Search failed: {e}")
+
             custom_field_id = None
             if self.name == "documentcustomfields":
                 custom_field_id = record.pop("custom_field_id", None)
@@ -150,6 +166,15 @@ class FallbackSink(PrecoroSink):
                 id = response.json()["id"]
                 idn = response.json().get("idn")
             pk = idn if self.name in ["invoices", "purchaseorders", "payments"] else id
+            
+            # Account Setup - Case 3 Step 2 (Patch microservice record)
+            if account_setup_enabled and account_setup_ref_id:
+                try:
+                    self.hit_account_setup_patch(account_setup_ref_id, pk, record)
+                except Exception as e:
+                    self.logger.error(f"AccountSetup Patch failed: {e}")
+                    raise
+
             self.patch_external_id(pk, base_endpoint, externalId)
 
             return id, True, state_updates
