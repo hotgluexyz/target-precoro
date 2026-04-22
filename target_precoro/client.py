@@ -1,6 +1,9 @@
 import backoff
 import requests
 import time
+import hmac
+import hashlib
+import json
 from datetime import datetime, timezone
 from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 from target_hotglue.client import HotglueSink
@@ -20,6 +23,21 @@ class PrecoroSink(HotglueSink):
         """Helper to extract mapField (e.g. uniqueCode, code) based on stream."""
         return record.get("uniqueCode") or record.get("code")
 
+    def _get_account_setup_headers(self, account_setup: dict, payload: dict = None) -> dict:
+        """Generate Authorization signature and headers for AccountSetup microservice."""
+        secret = str(account_setup.get("secret"))
+        company_id = str(account_setup.get("companyId", ""))
+        
+        payload_json = json.dumps(payload) if payload is not None else ""
+
+        string_to_sign = f"{payload_json}.{company_id}"
+        signature = hmac.new(bytes(secret, 'UTF-8'), string_to_sign.encode(), hashlib.sha256).hexdigest()
+
+        return {
+            "X-PRECORO-AUTH": signature,
+            "X-COMPANY-ID": company_id,
+        }
+
     def hit_account_setup_search(self, integration_id: str, record: dict, legal_entity_id) -> dict:
         account_setup = self.config.get("AccountSetup", {})
         base_url = account_setup.get("url", "").rstrip("/")
@@ -37,8 +55,24 @@ class PrecoroSink(HotglueSink):
         }
         
         url = f"{base_url}/api/hotglue/account_setup/search"
+        headers = self._get_account_setup_headers(account_setup, payload)
         self.logger.info(f"POST {url} with payload: {payload}")
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        response.raise_for_status()
+        return response.json()
+
+    def fetch_account_setup_records(self, external_id: str) -> dict:
+        account_setup = self.config.get("AccountSetup", {})
+        base_url = account_setup.get("url", "").rstrip("/")
+        if not base_url:
+            return None
+        
+        url = f"{base_url}/api/hotglue/account_setup"
+        params = {"externalId": external_id}
+        headers = self._get_account_setup_headers(account_setup, payload=None)
+        
+        self.logger.info(f"GET {url}?externalId={external_id}")
+        response = requests.get(url, params=params, headers=headers, timeout=15)
         response.raise_for_status()
         return response.json()
 
@@ -56,8 +90,9 @@ class PrecoroSink(HotglueSink):
         }
         
         url = f"{base_url}/api/hotglue/account_setup/{as_external_id}"
+        headers = self._get_account_setup_headers(account_setup, payload)
         self.logger.info(f"PATCH {url} with payload: {payload}")
-        response = requests.patch(url, json=payload, timeout=15)
+        response = requests.patch(url, json=payload, headers=headers, timeout=15)
         response.raise_for_status()
         return response.json()
 

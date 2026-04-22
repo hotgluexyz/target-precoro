@@ -115,16 +115,32 @@ class FallbackSink(PrecoroSink):
             legalEntityId = record.pop("legalEntityId", None)
             account_setup_enabled = self.config.get("AccountSetup", {}).get("enabled", False)
             account_setup_ref_id = None
+            all_legal_entity_ids = []
             
             if account_setup_enabled and externalId:
+                self.logger.info(f"Triggering AccountSetup search for externalId: {externalId}")
                 try:
                     search_resp = self.hit_account_setup_search(externalId, record, legalEntityId)
+                    self.logger.info(f"AccountSetup Search Response: {search_resp}")
                     if search_resp and search_resp.get("isSuccess"):
                         account_setup_ref_id = search_resp.get("externalId")
                         precoro_id = search_resp.get("precoroId")
+                        
                         if precoro_id:
                             # if Precoro record exists, we tell target it's an update (PUT)
                             record["id"] = str(precoro_id)
+                            self.logger.info(f"Found precoroId {precoro_id}. Setting record method to PUT.")
+                            
+                            try:
+                                fetch_resp = self.fetch_account_setup_records(account_setup_ref_id)
+                                if fetch_resp and fetch_resp.get("isSuccess"):
+                                    records = fetch_resp.get("records", [])
+                                    # Build list of unique legalEntityIds currently registered
+                                    all_legal_entity_ids = list(set([r.get("legalEntityId") for r in records if r.get("legalEntityId") is not None]))
+                                    self.logger.info(f"Fetched Legal Entities for update: {all_legal_entity_ids}")
+                            except Exception as e_get:
+                                self.logger.error(f"AccountSetup GET failed: {e_get}")
+                                
                 except Exception as e:
                     self.logger.error(f"AccountSetup Search failed: {e}")
 
@@ -152,6 +168,12 @@ class FallbackSink(PrecoroSink):
             if self.name == "payments":
                 self.check_and_fix_payment_amount(record)
 
+            if self.name == "suppliers":
+                if all_legal_entity_ids:
+                    record["supplierLegalEntityIds[]"] = [str(le) for le in all_legal_entity_ids]
+                elif legalEntityId:
+                    record["supplierLegalEntityIds[]"] = str(legalEntityId)
+
             endpoint = base_endpoint
             if id:
                 id = int(id)
@@ -169,8 +191,10 @@ class FallbackSink(PrecoroSink):
             
             # Account Setup - Case 3 Step 2 (Patch microservice record)
             if account_setup_enabled and account_setup_ref_id:
+                self.logger.info(f"Triggering AccountSetup patch for externalId {account_setup_ref_id} with precoroId {pk}")
                 try:
-                    self.hit_account_setup_patch(account_setup_ref_id, pk, record)
+                    patch_resp = self.hit_account_setup_patch(account_setup_ref_id, pk, record)
+                    self.logger.info(f"AccountSetup Patch Response: {patch_resp}")
                 except Exception as e:
                     self.logger.error(f"AccountSetup Patch failed: {e}")
                     raise
