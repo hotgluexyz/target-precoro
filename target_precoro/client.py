@@ -27,16 +27,31 @@ class PrecoroSink(HotglueSink):
         """Generate Authorization signature and headers for AccountSetup microservice."""
         secret = str(account_setup.get("secret"))
         company_id = str(account_setup.get("companyId", ""))
-        
-        payload_json = json.dumps(payload) if payload is not None else ""
+
+        # Signature must use compact JSON for non-GET and empty payload for GET.
+        payload_json = json.dumps(payload, separators=(",", ":")) if payload is not None else ""
 
         string_to_sign = f"{payload_json}.{company_id}"
         signature = hmac.new(bytes(secret, 'UTF-8'), string_to_sign.encode(), hashlib.sha256).hexdigest()
 
-        return {
+        headers = {
             "X-PRECORO-AUTH": signature,
-            "X-COMPANY-ID": company_id,
+            "X-COMPANY-ID": company_id
         }
+        if self.config.get("auth_token"):
+            headers["X-AUTH-TOKEN"] = self.config.get("auth_token")
+        if self.config.get("email"):
+            headers["email"] = self.config.get("email")
+        return headers
+
+    def _raise_account_setup_for_status(self, response: requests.Response, context: str) -> None:
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as err:
+            self.logger.error(
+                f"{context} failed: HTTP {response.status_code}. Response body: {response.text}"
+            )
+            raise err
 
     def hit_account_setup_search(self, integration_id: str, record: dict, legal_entity_id) -> dict:
         account_setup = self.config.get("AccountSetup", {})
@@ -44,9 +59,10 @@ class PrecoroSink(HotglueSink):
         if not base_url:
             self.logger.warning("AccountSetup URL is not configured.")
             return None
+
         
         payload = {
-            "legalEntityId": legal_entity_id,
+            "legalEntityId": int(legal_entity_id),
             "entityType": self.ENTITY_TYPE_MAP.get(self.name, 1),
             "integrationType": account_setup.get("integrationType"),
             "integrationId": integration_id,
@@ -58,7 +74,7 @@ class PrecoroSink(HotglueSink):
         headers = self._get_account_setup_headers(account_setup, payload)
         self.logger.info(f"POST {url} with payload: {payload}")
         response = requests.post(url, json=payload, headers=headers, timeout=15)
-        response.raise_for_status()
+        self._raise_account_setup_for_status(response, "AccountSetup search")
         return response.json()
 
     def fetch_account_setup_records(self, external_id: str) -> dict:
@@ -73,7 +89,7 @@ class PrecoroSink(HotglueSink):
         
         self.logger.info(f"GET {url}?externalId={external_id}")
         response = requests.get(url, params=params, headers=headers, timeout=15)
-        response.raise_for_status()
+        self._raise_account_setup_for_status(response, "AccountSetup fetch")
         return response.json()
 
     def hit_account_setup_patch(self, as_external_id: str, precoro_id, record: dict) -> dict:
@@ -93,7 +109,7 @@ class PrecoroSink(HotglueSink):
         headers = self._get_account_setup_headers(account_setup, payload)
         self.logger.info(f"PATCH {url} with payload: {payload}")
         response = requests.patch(url, json=payload, headers=headers, timeout=15)
-        response.raise_for_status()
+        self._raise_account_setup_for_status(response, "AccountSetup patch")
         return response.json()
 
     @property
