@@ -104,6 +104,39 @@ class FallbackSink(PrecoroSink):
         if abs(round((remaining_amount - record.get("sumPaid")), 2)) <= 0.01:
             record["sumPaid"] = remaining_amount
 
+    def _apply_account_setup_logic(self, externalId: str, legalEntityId, record: dict):
+        """Handle fetching and mapping externalId via Account Setup microservice."""
+        account_setup_ref_id = None
+        all_legal_entity_ids = []
+        
+        self.logger.info(f"Triggering AccountSetup search for externalId: {externalId}")
+        try:
+            search_resp = self.hit_account_setup_search(externalId, record, legalEntityId)
+            self.logger.info(f"AccountSetup Search Response: {search_resp}")
+            if search_resp and search_resp.get("isSuccess"):
+                account_setup_ref_id = search_resp.get("externalId")
+                precoro_id = search_resp.get("precoroId")
+                
+                if precoro_id:
+                    # if Precoro record exists, we tell target it's an update (PUT)
+                    record["id"] = str(precoro_id)
+                    self.logger.info(f"Found precoroId {precoro_id}. Setting record method to PUT.")
+                    
+                    try:
+                        fetch_resp = self.fetch_account_setup_records(account_setup_ref_id)
+                        if fetch_resp and fetch_resp.get("isSuccess"):
+                            records = fetch_resp.get("records", [])
+                            # Build list of unique legalEntityIds currently registered
+                            all_legal_entity_ids = list({r.get("legalEntityId") for r in records if r.get("legalEntityId") is not None})
+                            self.logger.info(f"Fetched Legal Entities for update: {all_legal_entity_ids}")
+                    except Exception as e_get:
+                        self.logger.error(f"AccountSetup GET failed: {e_get}")
+                        
+        except Exception as e:
+            self.logger.error(f"AccountSetup Search failed: {e}")
+            
+        return account_setup_ref_id, all_legal_entity_ids
+
     def upsert_record(self, record: dict, context: dict):
         state_updates = dict()
         method = "POST"
@@ -118,31 +151,7 @@ class FallbackSink(PrecoroSink):
             all_legal_entity_ids = []
             
             if account_setup_enabled and externalId:
-                self.logger.info(f"Triggering AccountSetup search for externalId: {externalId}")
-                try:
-                    search_resp = self.hit_account_setup_search(externalId, record, legalEntityId)
-                    self.logger.info(f"AccountSetup Search Response: {search_resp}")
-                    if search_resp and search_resp.get("isSuccess"):
-                        account_setup_ref_id = search_resp.get("externalId")
-                        precoro_id = search_resp.get("precoroId")
-                        
-                        if precoro_id:
-                            # if Precoro record exists, we tell target it's an update (PUT)
-                            record["id"] = str(precoro_id)
-                            self.logger.info(f"Found precoroId {precoro_id}. Setting record method to PUT.")
-                            
-                            try:
-                                fetch_resp = self.fetch_account_setup_records(account_setup_ref_id)
-                                if fetch_resp and fetch_resp.get("isSuccess"):
-                                    records = fetch_resp.get("records", [])
-                                    # Build list of unique legalEntityIds currently registered
-                                    all_legal_entity_ids = list(set([r.get("legalEntityId") for r in records if r.get("legalEntityId") is not None]))
-                                    self.logger.info(f"Fetched Legal Entities for update: {all_legal_entity_ids}")
-                            except Exception as e_get:
-                                self.logger.error(f"AccountSetup GET failed: {e_get}")
-                                
-                except Exception as e:
-                    self.logger.error(f"AccountSetup Search failed: {e}")
+                account_setup_ref_id, all_legal_entity_ids = self._apply_account_setup_logic(externalId, legalEntityId, record)
 
             custom_field_id = None
             if self.name == "documentcustomfields":

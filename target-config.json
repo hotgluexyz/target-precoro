@@ -1,0 +1,20 @@
+{
+    "auth_token": "77e43acd68f10409dcd5fcadada100c08ece5272",
+    "email": "laura.alvarez@rakuten.com",
+    "base_url": "https://api.precoro.com",
+    "only_update_existing_records": [
+        {
+            "table": "suppliers",
+            "is_icf": false,
+            "is_dcf": false
+        },
+        {
+            "table": "itemcustomfields",
+            "is_icf": true,
+            "is_dcf": false
+        }
+    ],
+    "input_path": "/home/hotglue/BTWmDu/etl-output",
+    "snapshot_dir": "/home/hotglue/BTWmDu/snapshots",
+    "path_prefix": ""
+}
