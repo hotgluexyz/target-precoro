@@ -152,6 +152,8 @@ class FallbackSink(PrecoroSink):
             
             if account_setup_enabled and externalId:
                 account_setup_ref_id, all_legal_entity_ids = self._apply_account_setup_logic(externalId, legalEntityId, record)
+                if account_setup_ref_id:
+                    externalId = account_setup_ref_id
 
             custom_field_id = None
             if self.name == "documentcustomfields":

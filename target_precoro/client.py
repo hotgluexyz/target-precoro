@@ -15,8 +15,22 @@ class PrecoroSink(HotglueSink):
     is_invoice_paid = False
 
     ENTITY_TYPE_MAP = {
-        "suppliers": 1,
-        # TODO: Add other streams types
+        "purchaseorders": 0,
+        "receipts": 4,
+        "invoices": 5,
+        "expenses": 6,
+        "payments": 7,
+        "suppliers": 8,
+        "items": 9,
+        "locations": 10,
+        "legalentities": 11,
+        "taxes": 12,
+        "companyusers": 13,
+        "documentcustomfieldoptions": 14,
+        "itemcustomfieldoptions": 15,
+        "documentcustomfields": 16,
+        "itemcustomfields": 17,
+        "attachments": 18,
     }
 
     def _get_account_setup_map_field(self, record: dict) -> str:
@@ -38,10 +52,6 @@ class PrecoroSink(HotglueSink):
             "X-PRECORO-AUTH": signature,
             "X-COMPANY-ID": company_id
         }
-        if self.config.get("auth_token"):
-            headers["X-AUTH-TOKEN"] = self.config.get("auth_token")
-        if self.config.get("email"):
-            headers["email"] = self.config.get("email")
         return headers
 
     def _raise_account_setup_for_status(self, response: requests.Response, context: str) -> None:
@@ -348,4 +358,3 @@ class PrecoroSink(HotglueSink):
                 raise Exception(
                     f"Failed while trying to send externalId {externalId}, error: {e}"
                 )
-
