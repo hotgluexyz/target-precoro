@@ -39,6 +39,13 @@ class ItemCustomFieldsSink(PrecoroSink):
 
         if record:
             externalId = record.pop("externalId", None)
+            legalEntityId = record.pop("legalEntityId", None)
+            account_setup_enabled = self.is_account_setup_enabled(externalId, legalEntityId)
+            account_setup_ref_id = None
+            if account_setup_enabled and externalId:
+                account_setup_ref_id, _ = self._apply_account_setup_logic(externalId, legalEntityId, record)
+                if account_setup_ref_id:
+                    externalId = account_setup_ref_id
 
             custom_field_id = record.pop("custom_field_id", None)
             if custom_field_id:
@@ -68,6 +75,13 @@ class ItemCustomFieldsSink(PrecoroSink):
             if custom_field_id not in self.id_mapping:
                 self.id_mapping[custom_field_id] = {}
             self.id_mapping[custom_field_id][externalId] = id
+
+            if account_setup_enabled and account_setup_ref_id:
+                self.logger.info(
+                    f"Triggering AccountSetup patch for externalId {account_setup_ref_id} with precoroId {id}"
+                )
+                patch_resp = self.hit_account_setup_patch(account_setup_ref_id, id, record)
+                self.logger.info(f"AccountSetup Patch Response: {patch_resp}")
 
             # patch record with externalId
             self.patch_external_id(id, base_endpoint, externalId)
@@ -113,36 +127,14 @@ class FallbackSink(PrecoroSink):
         if record:
             externalId = record.pop("externalId", None)
             legalEntityId = record.pop("legalEntityId", None)
-            account_setup_enabled = self.config.get("AccountSetup", {}).get("enabled", False)
+            account_setup_enabled = self.is_account_setup_enabled(externalId, legalEntityId)
             account_setup_ref_id = None
             all_legal_entity_ids = []
             
             if account_setup_enabled and externalId:
-                self.logger.info(f"Triggering AccountSetup search for externalId: {externalId}")
-                try:
-                    search_resp = self.hit_account_setup_search(externalId, record, legalEntityId)
-                    self.logger.info(f"AccountSetup Search Response: {search_resp}")
-                    if search_resp and search_resp.get("isSuccess"):
-                        account_setup_ref_id = search_resp.get("externalId")
-                        precoro_id = search_resp.get("precoroId")
-                        
-                        if precoro_id:
-                            # if Precoro record exists, we tell target it's an update (PUT)
-                            record["id"] = str(precoro_id)
-                            self.logger.info(f"Found precoroId {precoro_id}. Setting record method to PUT.")
-                            
-                            try:
-                                fetch_resp = self.fetch_account_setup_records(account_setup_ref_id)
-                                if fetch_resp and fetch_resp.get("isSuccess"):
-                                    records = fetch_resp.get("records", [])
-                                    # Build list of unique legalEntityIds currently registered
-                                    all_legal_entity_ids = list(set([r.get("legalEntityId") for r in records if r.get("legalEntityId") is not None]))
-                                    self.logger.info(f"Fetched Legal Entities for update: {all_legal_entity_ids}")
-                            except Exception as e_get:
-                                self.logger.error(f"AccountSetup GET failed: {e_get}")
-                                
-                except Exception as e:
-                    self.logger.error(f"AccountSetup Search failed: {e}")
+                account_setup_ref_id, all_legal_entity_ids = self._apply_account_setup_logic(externalId, legalEntityId, record)
+                if account_setup_ref_id:
+                    externalId = account_setup_ref_id
 
             custom_field_id = None
             if self.name == "documentcustomfields":

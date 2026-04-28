@@ -13,10 +13,29 @@ class PrecoroSink(HotglueSink):
 
     item_custom_fields = {}
     is_invoice_paid = False
+    ACCOUNT_SETUP_STREAMS = {
+        "suppliers",
+        "documentcustomfields",
+        "itemcustomfields",
+    }
 
     ENTITY_TYPE_MAP = {
-        "suppliers": 1,
-        # TODO: Add other streams types
+        "purchaseorders": 0,
+        "receipts": 4,
+        "invoices": 5,
+        "expenses": 6,
+        "payments": 7,
+        "suppliers": 8,
+        "items": 9,
+        "locations": 10,
+        "legalentities": 11,
+        "taxes": 12,
+        "companyusers": 13,
+        "documentcustomfieldoptions": 14,
+        "itemcustomfieldoptions": 15,
+        "documentcustomfields": 16,
+        "itemcustomfields": 17,
+        "attachments": 18,
     }
 
     def _get_account_setup_map_field(self, record: dict) -> str:
@@ -38,10 +57,6 @@ class PrecoroSink(HotglueSink):
             "X-PRECORO-AUTH": signature,
             "X-COMPANY-ID": company_id
         }
-        if self.config.get("auth_token"):
-            headers["X-AUTH-TOKEN"] = self.config.get("auth_token")
-        if self.config.get("email"):
-            headers["email"] = self.config.get("email")
         return headers
 
     def _raise_account_setup_for_status(self, response: requests.Response, context: str) -> None:
@@ -60,14 +75,27 @@ class PrecoroSink(HotglueSink):
             self.logger.warning("AccountSetup URL is not configured.")
             return None
 
-        
+        if legal_entity_id is None:
+            self.logger.info("Skipping AccountSetup search because legalEntityId is missing.")
+            return None
+
+        map_field = self._get_account_setup_map_field(record)
+        if not map_field:
+            self.logger.info("Skipping AccountSetup search because mapField is missing.")
+            return None
+
+        integration_type = account_setup.get("integrationType")
+        if not integration_type:
+            self.logger.warning("Skipping AccountSetup search because integrationType is not configured.")
+            return None
+
         payload = {
             "legalEntityId": int(legal_entity_id),
             "entityType": self.ENTITY_TYPE_MAP.get(self.name, 1),
-            "integrationType": account_setup.get("integrationType"),
+            "integrationType": integration_type,
             "integrationId": integration_id,
             "name": record.get("name"),
-            "mapField": self._get_account_setup_map_field(record)
+            "mapField": map_field,
         }
         
         url = f"{base_url}/api/hotglue/account_setup/search"
@@ -111,6 +139,47 @@ class PrecoroSink(HotglueSink):
         response = requests.patch(url, json=payload, headers=headers, timeout=15)
         self._raise_account_setup_for_status(response, "AccountSetup patch")
         return response.json()
+
+    def is_account_setup_enabled(self, external_id, legal_entity_id) -> bool:
+        return (
+            self.name in self.ACCOUNT_SETUP_STREAMS
+            and self.config.get("AccountSetup", {}).get("enabled", False)
+            and external_id is not None
+            and legal_entity_id is not None
+        )
+
+    def _apply_account_setup_logic(self, external_id: str, legal_entity_id, record: dict):
+        """Handle fetching and mapping externalId via Account Setup microservice."""
+        account_setup_ref_id = None
+        all_legal_entity_ids = []
+
+        self.logger.info(f"Triggering AccountSetup search for externalId: {external_id}")
+        try:
+            search_resp = self.hit_account_setup_search(external_id, record, legal_entity_id)
+            self.logger.info(f"AccountSetup Search Response: {search_resp}")
+            if search_resp and search_resp.get("isSuccess"):
+                account_setup_ref_id = search_resp.get("externalId")
+                precoro_id = search_resp.get("precoroId")
+
+                if precoro_id:
+                    record["id"] = str(precoro_id)
+                    self.logger.info(f"Found precoroId {precoro_id}. Setting record method to PUT.")
+
+                    try:
+                        fetch_resp = self.fetch_account_setup_records(account_setup_ref_id)
+                        if fetch_resp and fetch_resp.get("isSuccess"):
+                            records = fetch_resp.get("records", [])
+                            all_legal_entity_ids = list(
+                                {r.get("legalEntityId") for r in records if r.get("legalEntityId") is not None}
+                            )
+                            self.logger.info(f"Fetched Legal Entities for update: {all_legal_entity_ids}")
+                    except Exception as exc:
+                        self.logger.error(f"AccountSetup GET failed: {exc}")
+
+        except Exception as exc:
+            self.logger.error(f"AccountSetup Search failed: {exc}")
+
+        return account_setup_ref_id, all_legal_entity_ids
 
     @property
     def base_url(self) -> str:
@@ -348,4 +417,3 @@ class PrecoroSink(HotglueSink):
                 raise Exception(
                     f"Failed while trying to send externalId {externalId}, error: {e}"
                 )
-
