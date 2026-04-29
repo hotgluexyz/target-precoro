@@ -39,8 +39,14 @@ class PrecoroSink(HotglueSink):
     }
 
     def _get_account_setup_map_field(self, record: dict) -> str:
-        """Helper to extract mapField (e.g. uniqueCode, code) based on stream."""
-        return record.get("uniqueCode") or record.get("code")
+        """Return the AccountSetup mapField value based on the current stream."""
+        stream_map_fields = {
+            "suppliers": "currency",
+            "documentcustomfields": "code",
+            "itemcustomfields": "code",
+        }
+        field_name = stream_map_fields.get(self.name)
+        return record.get(field_name)
 
     def _get_account_setup_headers(self, account_setup: dict, payload: dict = None) -> dict:
         """Generate Authorization signature and headers for AccountSetup microservice."""
