@@ -4,6 +4,7 @@ import time
 import hmac
 import hashlib
 import json
+from requests.exceptions import JSONDecodeError as RequestsJSONDecodeError
 from datetime import datetime, timezone
 from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 from target_hotglue.client import HotglueSink
@@ -74,6 +75,50 @@ class PrecoroSink(HotglueSink):
             )
             raise err
 
+    def _get_account_setup_id(self, payload: dict | None) -> str | None:
+        if not payload:
+            return None
+        return payload.get("accountSetupId") or payload.get("externalId") or payload.get("id")
+
+    def _build_account_setup_search_payload(
+        self,
+        integration_id: str,
+        legal_entity_id,
+        record: dict | None = None,
+        custom_field_id=None,
+    ) -> dict | None:
+        account_setup = self.config.get("AccountSetup", {})
+        integration_type = account_setup.get("integrationType")
+        if not integration_type:
+            self.logger.warning("Skipping AccountSetup search because integrationType is not configured.")
+            return None
+
+        payload = {
+            "legalEntityId": int(legal_entity_id),
+            "entityType": self.ENTITY_TYPE_MAP.get(self.name, 1),
+            "integrationType": integration_type,
+            "integrationId": integration_id,
+        }
+
+        record = record or {}
+        map_field = self._get_account_setup_map_field(record)
+        if map_field:
+            payload["mapField"] = map_field
+
+        name = record.get("name")
+        if name:
+            payload["name"] = name
+
+        custom_field_id = custom_field_id if custom_field_id is not None else record.get("custom_field_id")
+        if self._is_custom_field_option_stream() and custom_field_id is not None:
+            payload["customFieldId"] = int(custom_field_id)
+
+        if self.name == "suppliers" and "mapField" not in payload:
+            self.logger.info("Skipping AccountSetup search because mapField is missing.")
+            return None
+
+        return payload
+
     def hit_account_setup_search(self, integration_id: str, record: dict, legal_entity_id) -> dict:
         account_setup = self.config.get("AccountSetup", {})
         base_url = account_setup.get("url", "").rstrip("/")
@@ -85,24 +130,9 @@ class PrecoroSink(HotglueSink):
             self.logger.info("Skipping AccountSetup search because legalEntityId is missing.")
             return None
 
-        map_field = self._get_account_setup_map_field(record)
-        if not map_field:
-            self.logger.info("Skipping AccountSetup search because mapField is missing.")
+        payload = self._build_account_setup_search_payload(integration_id, legal_entity_id, record=record)
+        if not payload:
             return None
-
-        integration_type = account_setup.get("integrationType")
-        if not integration_type:
-            self.logger.warning("Skipping AccountSetup search because integrationType is not configured.")
-            return None
-
-        payload = {
-            "legalEntityId": int(legal_entity_id),
-            "entityType": self.ENTITY_TYPE_MAP.get(self.name, 1),
-            "integrationType": integration_type,
-            "integrationId": integration_id,
-            "name": record.get("name"),
-            "mapField": map_field,
-        }
         
         url = f"{base_url}/api/hotglue/account_setup/search"
         headers = self._get_account_setup_headers(account_setup, payload)
@@ -110,6 +140,41 @@ class PrecoroSink(HotglueSink):
         response = requests.post(url, json=payload, headers=headers, timeout=15)
         self._raise_account_setup_for_status(response, "AccountSetup search")
         return response.json()
+
+    def lookup_account_setup_record(
+        self,
+        source_external_id: str,
+        legal_entity_id,
+        custom_field_id=None,
+    ) -> dict | None:
+        if not source_external_id or legal_entity_id is None:
+            return None
+
+        fetch_resp = self.fetch_account_setup_records(source_external_id)
+        if not fetch_resp or not fetch_resp.get("isSuccess"):
+            return None
+
+        records = fetch_resp.get("records", [])
+        for record in records:
+            if record.get("legalEntityId") != int(legal_entity_id):
+                continue
+
+            record_custom_field_id = record.get("customFieldId")
+            if custom_field_id is not None and record_custom_field_id not in (None, int(custom_field_id)):
+                continue
+
+            return record
+
+        return None
+
+    def lookup_account_setup_id_by_source_identity(
+        self,
+        source_external_id: str,
+        legal_entity_id,
+        custom_field_id=None,
+    ) -> str | None:
+        record = self.lookup_account_setup_record(source_external_id, legal_entity_id, custom_field_id)
+        return self._get_account_setup_id(record)
 
     def fetch_account_setup_records(self, external_id: str) -> dict:
         account_setup = self.config.get("AccountSetup", {})
@@ -169,15 +234,20 @@ class PrecoroSink(HotglueSink):
         if not endpoint or not option_id_param:
             return None
 
+        entity_ids_payload = (
+            str(legal_entity_ids[0])
+            if len(legal_entity_ids) == 1
+            else f"[{', '.join(str(le) for le in legal_entity_ids)}]"
+        )
         payload = {
-            option_id_param: option_id,
-            "depend_type": 1,
-            "entity_ids": legal_entity_ids[0] if len(legal_entity_ids) == 1 else legal_entity_ids,
+            option_id_param: str(option_id),
+            "depend_type": "1",
+            "entity_ids": entity_ids_payload,
         }
 
         response = requests.patch(
             self.url(endpoint),
-            json=payload,
+            data=payload,
             headers=self.default_headers,
             timeout=15,
         )
@@ -202,7 +272,7 @@ class PrecoroSink(HotglueSink):
             search_resp = self.hit_account_setup_search(external_id, record, legal_entity_id)
             self.logger.info(f"AccountSetup Search Response: {search_resp}")
             if search_resp and search_resp.get("isSuccess"):
-                account_setup_ref_id = search_resp.get("externalId")
+                account_setup_ref_id = self._get_account_setup_id(search_resp)
                 precoro_id = search_resp.get("precoroId")
 
                 if precoro_id:
@@ -232,6 +302,7 @@ class PrecoroSink(HotglueSink):
         account_setup_enabled = self.is_account_setup_enabled(external_id, legal_entity_id)
 
         context = {
+            "source_external_id": external_id,
             "external_id": external_id,
             "legal_entity_id": legal_entity_id,
             "account_setup_enabled": account_setup_enabled,
@@ -272,6 +343,77 @@ class PrecoroSink(HotglueSink):
             return [int(legal_entity_id)]
         return []
 
+    def find_custom_field_option_id(self, base_endpoint: str, external_id: str):
+        if not base_endpoint or not external_id:
+            return None
+
+        try:
+            response = self.request_api("GET", endpoint=base_endpoint)
+            options = response.json().get("data", [])
+            for option in options:
+                if str(option.get("externalId")) == str(external_id):
+                    option_id = option.get("id")
+                    return str(option_id) if option_id is not None else None
+        except Exception as exc:
+            self.logger.warning(
+                f"Failed to lookup existing custom field option for externalId {external_id} "
+                f"at {base_endpoint}: {exc}"
+            )
+        return None
+
+    def prepare_custom_field_account_setup_context(
+        self,
+        record: dict,
+        context: dict,
+        base_endpoint: str,
+        custom_field_id: str,
+    ) -> None:
+        if not context.get("account_setup_enabled"):
+            return
+
+        external_id = context.get("external_id")
+        if external_id:
+            record["externalId"] = external_id
+
+    def prepare_gl_parent_linkage(
+        self,
+        record: dict,
+        context: dict,
+        base_endpoint: str,
+        custom_field_id: str,
+        id_mapping: dict,
+    ) -> None:
+        parent_external_id = record.pop("parentExternalId", None)
+        if not parent_external_id or record.get("parent[id]") or not context.get("account_setup_enabled"):
+            if parent_external_id and not context.get("account_setup_enabled"):
+                parent_id = id_mapping.get(custom_field_id, {}).get(parent_external_id)
+                if parent_id:
+                    record["parent[id]"] = parent_id
+                else:
+                    record["parentExternalId"] = parent_external_id
+            return
+
+        legal_entity_id = context.get("legal_entity_id")
+        parent_account_setup_id = self.lookup_account_setup_id_by_source_identity(
+            parent_external_id,
+            legal_entity_id,
+            custom_field_id=custom_field_id,
+        )
+        if not parent_account_setup_id:
+            raise Exception(
+                f"Parent {parent_external_id} not found in AccountSetup for legalEntityId {legal_entity_id}"
+            )
+
+        parent_id = id_mapping.get(custom_field_id, {}).get(parent_account_setup_id)
+        if not parent_id:
+            parent_id = self.find_custom_field_option_id(base_endpoint, parent_account_setup_id)
+
+        if parent_id:
+            record["parent[id]"] = parent_id
+            return
+
+        record["parentExternalId"] = parent_account_setup_id
+
     def apply_account_setup_dependencies(self, context: dict, precoro_id) -> None:
         """Apply extra Precoro dependency updates required by AccountSetup flows."""
         if not context.get("account_setup_enabled") or not self._is_custom_field_option_stream():
@@ -303,6 +445,10 @@ class PrecoroSink(HotglueSink):
         )
         patch_resp = self.hit_account_setup_patch(account_setup_ref_id, precoro_id, record)
         self.logger.info(f"AccountSetup Patch Response: {patch_resp}")
+
+    def should_patch_external_id(self, context: dict) -> bool:
+        """Whether externalId should be patched after upsert instead of sent in the upsert payload."""
+        return not (context.get("account_setup_enabled") and self._is_custom_field_option_stream())
 
     @property
     def base_url(self) -> str:
@@ -460,7 +606,15 @@ class PrecoroSink(HotglueSink):
             raise RetriableAPIError(msg, response)
         elif 400 <= response.status_code < 500:
             # ignore error of invoice being fully paid
-            invoice_payment_error = response.json().get("errors", {}).get("errors", {}).get("sumPaid", "")
+            try:
+                response_json = response.json()
+            except (ValueError, RequestsJSONDecodeError):
+                response_json = {}
+
+            if isinstance(response_json, dict):
+                invoice_payment_error = response_json.get("errors", {}).get("errors", {}).get("sumPaid", "")
+            else:
+                invoice_payment_error = ""
             if invoice_payment_error in ["The amount must be greater than 0 and not exceed 0", 'The Invoice is already fully paid.']:
                 self.is_invoice_paid = True
                 return
