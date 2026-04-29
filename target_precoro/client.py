@@ -146,6 +146,44 @@ class PrecoroSink(HotglueSink):
         self._raise_account_setup_for_status(response, "AccountSetup patch")
         return response.json()
 
+    def _is_custom_field_option_stream(self) -> bool:
+        return self.name in {"itemcustomfields", "documentcustomfields"}
+
+    def _get_depend_add_endpoint(self) -> str | None:
+        if self.name == "itemcustomfields":
+            return "/itemcustomfields/options/depend_add"
+        if self.name == "documentcustomfields":
+            return "/documentcustomfields/options/depend_add"
+        return None
+
+    def _get_depend_add_option_id_param(self) -> str | None:
+        if self.name == "itemcustomfields":
+            return "item_custom_field_option_id"
+        if self.name == "documentcustomfields":
+            return "document_custom_field_option_id"
+        return None
+
+    def hit_custom_field_option_depend_add(self, option_id, legal_entity_ids: list[int]) -> dict:
+        endpoint = self._get_depend_add_endpoint()
+        option_id_param = self._get_depend_add_option_id_param()
+        if not endpoint or not option_id_param:
+            return None
+
+        payload = {
+            option_id_param: option_id,
+            "depend_type": 1,
+            "entity_ids": legal_entity_ids[0] if len(legal_entity_ids) == 1 else legal_entity_ids,
+        }
+
+        response = requests.patch(
+            self.url(endpoint),
+            json=payload,
+            headers=self.default_headers,
+            timeout=15,
+        )
+        self.validate_response(response)
+        return response.json() if response.content else {}
+
     def is_account_setup_enabled(self, external_id, legal_entity_id) -> bool:
         return (
             self.name in self.ACCOUNT_SETUP_STREAMS
@@ -225,12 +263,41 @@ class PrecoroSink(HotglueSink):
         elif legal_entity_id:
             record["supplierLegalEntityIds[]"] = str(legal_entity_id)
 
-    def finalize_account_setup(self, context: dict, precoro_id, record: dict) -> None:
-        """Patch AccountSetup record after Precoro entity has been created or updated."""
-        if not context.get("account_setup_enabled") or not context.get("account_setup_ref_id"):
+    def _get_account_setup_legal_entity_ids(self, context: dict) -> list[int]:
+        all_legal_entity_ids = context.get("all_legal_entity_ids") or []
+        legal_entity_id = context.get("legal_entity_id")
+        if all_legal_entity_ids:
+            return [int(le) for le in all_legal_entity_ids]
+        if legal_entity_id:
+            return [int(legal_entity_id)]
+        return []
+
+    def apply_account_setup_dependencies(self, context: dict, precoro_id) -> None:
+        """Apply extra Precoro dependency updates required by AccountSetup flows."""
+        if not context.get("account_setup_enabled") or not self._is_custom_field_option_stream():
             return
 
-        account_setup_ref_id = context["account_setup_ref_id"]
+        legal_entity_ids = self._get_account_setup_legal_entity_ids(context)
+        if not legal_entity_ids:
+            return
+
+        self.logger.info(
+            f"Triggering depend_add for {self.name} option {precoro_id} with legal entities {legal_entity_ids}"
+        )
+        depend_resp = self.hit_custom_field_option_depend_add(precoro_id, legal_entity_ids)
+        self.logger.info(f"depend_add Response: {depend_resp}")
+
+    def finalize_account_setup(self, context: dict, precoro_id, record: dict) -> None:
+        """Patch AccountSetup record after Precoro entity has been created or updated."""
+        if not context.get("account_setup_enabled"):
+            return
+
+        self.apply_account_setup_dependencies(context, precoro_id)
+
+        account_setup_ref_id = context.get("account_setup_ref_id")
+        if not account_setup_ref_id:
+            return
+
         self.logger.info(
             f"Triggering AccountSetup patch for externalId {account_setup_ref_id} with precoroId {precoro_id}"
         )
