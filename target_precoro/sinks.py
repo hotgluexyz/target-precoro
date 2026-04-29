@@ -38,14 +38,8 @@ class ItemCustomFieldsSink(PrecoroSink):
             raise Exception(record.get("error"))
 
         if record:
-            externalId = record.pop("externalId", None)
-            legalEntityId = record.pop("legalEntityId", None)
-            account_setup_enabled = self.is_account_setup_enabled(externalId, legalEntityId)
-            account_setup_ref_id = None
-            if account_setup_enabled and externalId:
-                account_setup_ref_id, _ = self._apply_account_setup_logic(externalId, legalEntityId, record)
-                if account_setup_ref_id:
-                    externalId = account_setup_ref_id
+            account_setup_context = self.prepare_account_setup_context(record)
+            externalId = account_setup_context["external_id"]
 
             custom_field_id = record.pop("custom_field_id", None)
             if custom_field_id:
@@ -76,12 +70,7 @@ class ItemCustomFieldsSink(PrecoroSink):
                 self.id_mapping[custom_field_id] = {}
             self.id_mapping[custom_field_id][externalId] = id
 
-            if account_setup_enabled and account_setup_ref_id:
-                self.logger.info(
-                    f"Triggering AccountSetup patch for externalId {account_setup_ref_id} with precoroId {id}"
-                )
-                patch_resp = self.hit_account_setup_patch(account_setup_ref_id, id, record)
-                self.logger.info(f"AccountSetup Patch Response: {patch_resp}")
+            self.finalize_account_setup(account_setup_context, id, record)
 
             # patch record with externalId
             self.patch_external_id(id, base_endpoint, externalId)
@@ -125,16 +114,8 @@ class FallbackSink(PrecoroSink):
         if record.get("error"):
             raise Exception(record.get("error"))
         if record:
-            externalId = record.pop("externalId", None)
-            legalEntityId = record.pop("legalEntityId", None)
-            account_setup_enabled = self.is_account_setup_enabled(externalId, legalEntityId)
-            account_setup_ref_id = None
-            all_legal_entity_ids = []
-
-            if account_setup_enabled and externalId:
-                account_setup_ref_id, all_legal_entity_ids = self._apply_account_setup_logic(externalId, legalEntityId, record)
-                if account_setup_ref_id:
-                    externalId = account_setup_ref_id
+            account_setup_context = self.prepare_account_setup_context(record)
+            externalId = account_setup_context["external_id"]
             custom_field_id = None
             if self.name == "documentcustomfields":
                 custom_field_id = record.pop("custom_field_id", None)
@@ -159,12 +140,6 @@ class FallbackSink(PrecoroSink):
             if self.name == "payments":
                 self.check_and_fix_payment_amount(record)
 
-            if self.name == "suppliers":
-                if all_legal_entity_ids:
-                    record["supplierLegalEntityIds[]"] = [str(le) for le in all_legal_entity_ids]
-                elif legalEntityId:
-                    record["supplierLegalEntityIds[]"] = str(legalEntityId)
-
             endpoint = base_endpoint
             if id:
                 id = int(id)
@@ -180,15 +155,11 @@ class FallbackSink(PrecoroSink):
                 idn = response.json().get("idn")
             pk = idn if self.name in ["invoices", "purchaseorders", "payments"] else id
             
-            # Account Setup - Case 3 Step 2 (Patch microservice record)
-            if account_setup_enabled and account_setup_ref_id:
-                self.logger.info(f"Triggering AccountSetup patch for externalId {account_setup_ref_id} with precoroId {pk}")
-                try:
-                    patch_resp = self.hit_account_setup_patch(account_setup_ref_id, pk, record)
-                    self.logger.info(f"AccountSetup Patch Response: {patch_resp}")
-                except Exception as e:
-                    self.logger.error(f"AccountSetup Patch failed: {e}")
-                    raise
+            try:
+                self.finalize_account_setup(account_setup_context, pk, record)
+            except Exception as e:
+                self.logger.error(f"AccountSetup Patch failed: {e}")
+                raise
 
             self.patch_external_id(pk, base_endpoint, externalId)
 

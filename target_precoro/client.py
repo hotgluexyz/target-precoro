@@ -187,6 +187,56 @@ class PrecoroSink(HotglueSink):
 
         return account_setup_ref_id, all_legal_entity_ids
 
+    def prepare_account_setup_context(self, record: dict) -> dict:
+        """Centralize AccountSetup preprocessing for record upserts."""
+        external_id = record.pop("externalId", None)
+        legal_entity_id = record.pop("legalEntityId", None)
+        account_setup_enabled = self.is_account_setup_enabled(external_id, legal_entity_id)
+
+        context = {
+            "external_id": external_id,
+            "legal_entity_id": legal_entity_id,
+            "account_setup_enabled": account_setup_enabled,
+            "account_setup_ref_id": None,
+            "all_legal_entity_ids": [],
+        }
+
+        if account_setup_enabled and external_id:
+            account_setup_ref_id, all_legal_entity_ids = self._apply_account_setup_logic(
+                external_id, legal_entity_id, record
+            )
+            context["account_setup_ref_id"] = account_setup_ref_id
+            context["all_legal_entity_ids"] = all_legal_entity_ids
+            if account_setup_ref_id:
+                context["external_id"] = account_setup_ref_id
+
+        self.apply_account_setup_record_fields(record, context)
+        return context
+
+    def apply_account_setup_record_fields(self, record: dict, context: dict) -> None:
+        """Apply record mutations that are relevant only for AccountSetup flows."""
+        if self.name != "suppliers" or not context.get("account_setup_enabled"):
+            return
+
+        all_legal_entity_ids = context.get("all_legal_entity_ids") or []
+        legal_entity_id = context.get("legal_entity_id")
+        if all_legal_entity_ids:
+            record["supplierLegalEntityIds[]"] = [str(le) for le in all_legal_entity_ids]
+        elif legal_entity_id:
+            record["supplierLegalEntityIds[]"] = str(legal_entity_id)
+
+    def finalize_account_setup(self, context: dict, precoro_id, record: dict) -> None:
+        """Patch AccountSetup record after Precoro entity has been created or updated."""
+        if not context.get("account_setup_enabled") or not context.get("account_setup_ref_id"):
+            return
+
+        account_setup_ref_id = context["account_setup_ref_id"]
+        self.logger.info(
+            f"Triggering AccountSetup patch for externalId {account_setup_ref_id} with precoroId {precoro_id}"
+        )
+        patch_resp = self.hit_account_setup_patch(account_setup_ref_id, precoro_id, record)
+        self.logger.info(f"AccountSetup Patch Response: {patch_resp}")
+
     @property
     def base_url(self) -> str:
         url = self.config.get("base_url") or "https://api.precoro.com"
