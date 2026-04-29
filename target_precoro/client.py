@@ -34,8 +34,8 @@ class PrecoroSink(HotglueSink):
         "companyusers": 13,
         "documentcustomfieldoptions": 14,
         "itemcustomfieldoptions": 15,
-        "documentcustomfields": 16,
-        "itemcustomfields": 17,
+        "documentcustomfields": 14, # It's actually 16, but we are sending it as a option, not as icf/dcf
+        "itemcustomfields": 15, # It's actually 17, but we are sending it as a option, not as icf/dcf
         "attachments": 18,
     }
 
@@ -141,40 +141,38 @@ class PrecoroSink(HotglueSink):
         self._raise_account_setup_for_status(response, "AccountSetup search")
         return response.json()
 
-    def lookup_account_setup_record(
-        self,
-        source_external_id: str,
-        legal_entity_id,
-        custom_field_id=None,
-    ) -> dict | None:
-        if not source_external_id or legal_entity_id is None:
-            return None
-
-        fetch_resp = self.fetch_account_setup_records(source_external_id)
-        if not fetch_resp or not fetch_resp.get("isSuccess"):
-            return None
-
-        records = fetch_resp.get("records", [])
-        for record in records:
-            if record.get("legalEntityId") != int(legal_entity_id):
-                continue
-
-            record_custom_field_id = record.get("customFieldId")
-            if custom_field_id is not None and record_custom_field_id not in (None, int(custom_field_id)):
-                continue
-
-            return record
-
-        return None
-
     def lookup_account_setup_id_by_source_identity(
         self,
         source_external_id: str,
         legal_entity_id,
         custom_field_id=None,
     ) -> str | None:
-        record = self.lookup_account_setup_record(source_external_id, legal_entity_id, custom_field_id)
-        return self._get_account_setup_id(record)
+        if not source_external_id or legal_entity_id is None:
+            return None
+
+        search_payload = self._build_account_setup_search_payload(
+            source_external_id,
+            legal_entity_id,
+            record={"custom_field_id": custom_field_id} if custom_field_id is not None else {},
+            custom_field_id=custom_field_id,
+        )
+        if not search_payload:
+            return None
+
+        account_setup = self.config.get("AccountSetup", {})
+        base_url = account_setup.get("url", "").rstrip("/")
+        if not base_url:
+            return None
+
+        url = f"{base_url}/api/hotglue/account_setup/search"
+        headers = self._get_account_setup_headers(account_setup, search_payload)
+        self.logger.info(f"POST {url} with payload: {search_payload}")
+        response = requests.post(url, json=search_payload, headers=headers, timeout=15)
+        self._raise_account_setup_for_status(response, "AccountSetup parent search")
+        response_json = response.json()
+        if not response_json.get("isSuccess"):
+            return None
+        return self._get_account_setup_id(response_json)
 
     def fetch_account_setup_records(self, external_id: str) -> dict:
         account_setup = self.config.get("AccountSetup", {})
