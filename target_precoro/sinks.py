@@ -18,9 +18,11 @@ class ItemCustomFieldsSink(PrecoroSink):
         """Process the record."""
         record = super().preprocess_record(record, context)
         custom_field_id = str(record.get("custom_field_id", None))
-        parentExternalId = record.pop("parentExternalId", None)
+        parentExternalId = record.get("parentExternalId", None)
         parentId = record.get("parent[id]", None)
         if parentExternalId and not parentId:
+            if self.is_account_setup_enabled(record.get("externalId"), record.get("legalEntityId")):
+                return record
             parentId = self.id_mapping.get(custom_field_id, {}).get(parentExternalId, None)
             if parentId:
                 record["parent[id]"] = parentId
@@ -38,7 +40,8 @@ class ItemCustomFieldsSink(PrecoroSink):
             raise Exception(record.get("error"))
 
         if record:
-            externalId = record.pop("externalId", None)
+            account_setup_context = self.prepare_account_setup_context(record)
+            externalId = account_setup_context.get("external_id")
 
             custom_field_id = record.pop("custom_field_id", None)
             if custom_field_id:
@@ -48,6 +51,20 @@ class ItemCustomFieldsSink(PrecoroSink):
                 )
             else:
                 raise Exception("No custom field id provided for the record")
+
+            self.prepare_custom_field_account_setup_context(
+                record,
+                account_setup_context,
+                base_endpoint,
+                custom_field_id,
+            )
+            self.prepare_gl_parent_linkage(
+                record,
+                account_setup_context,
+                base_endpoint,
+                custom_field_id,
+                self.id_mapping,
+            )
             
             endpoint = base_endpoint
             # Skip new records when only_update_existing_records applies
@@ -69,8 +86,10 @@ class ItemCustomFieldsSink(PrecoroSink):
                 self.id_mapping[custom_field_id] = {}
             self.id_mapping[custom_field_id][externalId] = id
 
-            # patch record with externalId
-            self.patch_external_id(id, base_endpoint, externalId)
+            self.finalize_account_setup(account_setup_context, id, record)
+
+            if self.should_patch_external_id(account_setup_context):
+                self.patch_external_id(id, base_endpoint, externalId)
 
             return id, True, state_updates
 
@@ -111,7 +130,8 @@ class FallbackSink(PrecoroSink):
         if record.get("error"):
             raise Exception(record.get("error"))
         if record:
-            externalId = record.pop("externalId", None)
+            account_setup_context = self.prepare_account_setup_context(record)
+            externalId = account_setup_context.get("external_id")
             custom_field_id = None
             if self.name == "documentcustomfields":
                 custom_field_id = record.pop("custom_field_id", None)
@@ -122,6 +142,12 @@ class FallbackSink(PrecoroSink):
                     )
                 else:
                     raise Exception("No custom field id provided for the record")
+                self.prepare_custom_field_account_setup_context(
+                    record,
+                    account_setup_context,
+                    base_endpoint,
+                    custom_field_id,
+                )
 
             # Skip new records when only_update_existing_records applies
             id = record.pop("id", None)
@@ -150,6 +176,14 @@ class FallbackSink(PrecoroSink):
                 id = response.json()["id"]
                 idn = response.json().get("idn")
             pk = idn if self.name in ["invoices", "purchaseorders", "payments"] else id
-            self.patch_external_id(pk, base_endpoint, externalId)
+            
+            try:
+                self.finalize_account_setup(account_setup_context, pk, record)
+            except Exception as e:
+                self.logger.error(f"AccountSetup Patch failed: {e}")
+                raise
+
+            if self.should_patch_external_id(account_setup_context):
+                self.patch_external_id(pk, base_endpoint, externalId)
 
             return id, True, state_updates

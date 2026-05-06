@@ -21,6 +21,16 @@ class TargetPrecoro(TargetHotglue):
         th.Property("auth_token", th.StringType, required=True),
         th.Property("email", th.StringType, required=True),
         th.Property(
+            "AccountSetup",
+            th.ObjectType(
+                th.Property("enabled", th.BooleanType),
+                th.Property("url", th.StringType),
+                th.Property("secret", th.StringType),
+                th.Property("companyId", th.StringType),
+                th.Property("integrationType", th.StringType),
+            ),
+        ),
+        th.Property(
             "only_update_existing_records",
             th.ArrayType(
                 th.ObjectType(
