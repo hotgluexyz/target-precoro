@@ -41,7 +41,7 @@ class ItemCustomFieldsSink(PrecoroSink):
 
         if record:
             account_setup_context = self.prepare_account_setup_context(record)
-            externalId = account_setup_context["external_id"]
+            externalId = account_setup_context.get("external_id")
 
             custom_field_id = record.pop("custom_field_id", None)
             if custom_field_id:
@@ -131,7 +131,7 @@ class FallbackSink(PrecoroSink):
             raise Exception(record.get("error"))
         if record:
             account_setup_context = self.prepare_account_setup_context(record)
-            externalId = account_setup_context["external_id"]
+            externalId = account_setup_context.get("external_id")
             custom_field_id = None
             if self.name == "documentcustomfields":
                 custom_field_id = record.pop("custom_field_id", None)
