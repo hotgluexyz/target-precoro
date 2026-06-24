@@ -573,8 +573,12 @@ class PrecoroSink(HotglueSink):
         params.update(self.params)
         data = request_data
 
-        # forcing an error to test backoff
-        # raise RetriableAPIError("Forcing a 429 error to test backoff behavior")
+        # Python's str(False) produces "False", but Precoro's API expects lowercase "false"/"true"
+        if isinstance(data, dict) and headers.get("Content-Type") == 'application/x-www-form-urlencoded':
+            data = {
+                k: str(v).lower() if isinstance(v, bool) else v
+                for k, v in data.items()
+            }
 
         response = requests.request(
             method=http_method, url=url, params=params, headers=headers, data=data, verify=verify
