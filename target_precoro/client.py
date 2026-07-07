@@ -341,6 +341,34 @@ class PrecoroSink(HotglueSink):
             return [int(legal_entity_id)]
         return []
 
+    def _get_existing_supplier_currencies(self, supplier_id) -> list:
+        try:
+            response = self.request_api("GET", endpoint=f"/suppliers/{supplier_id}")
+            data = response.json()
+        except Exception as exc:
+            self.logger.warning(f"Failed to fetch existing supplier {supplier_id} for currency merge: {exc}")
+            return []
+        return data.get("currencies") or [] if isinstance(data, dict) else []
+
+    def merge_supplier_currencies(self, record: dict, supplier_id) -> None:
+        """Merge the incoming currency into the supplier's existing currency list instead of replacing it.
+
+        Some source systems (e.g. Dynamics BC) only carry a single default currency per vendor,
+        while a Precoro supplier can have several (e.g. set up earlier via XLSX import). Sending
+        that single currency as-is on update would make Precoro replace the whole list, silently
+        dropping currencies still used by existing invoices.
+        """
+        incoming = record.get("currencies[]")
+        if incoming is None:
+            return
+
+        incoming_list = incoming if isinstance(incoming, list) else [incoming]
+        merged = list(self._get_existing_supplier_currencies(supplier_id))
+        for currency in incoming_list:
+            if currency and currency not in merged:
+                merged.append(currency)
+        record["currencies[]"] = merged
+
     def find_custom_field_option_id(self, base_endpoint: str, external_id: str):
         if not base_endpoint or not external_id:
             return None

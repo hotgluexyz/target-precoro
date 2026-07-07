@@ -167,6 +167,8 @@ class FallbackSink(PrecoroSink):
                 id = int(id)
                 method = "PUT"
                 endpoint = f"{base_endpoint}/{id}"
+                if self.name == "suppliers":
+                    self.merge_supplier_currencies(record, id)
             response = self.request_api(method, endpoint=endpoint, request_data=record)
             # if invoice is fully paid return a dummy id so the job doesn't fail
             if self.is_invoice_paid:
