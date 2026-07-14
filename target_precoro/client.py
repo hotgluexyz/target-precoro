@@ -6,8 +6,8 @@ import hashlib
 import json
 from requests.exceptions import JSONDecodeError as RequestsJSONDecodeError
 from datetime import datetime, timezone
-from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
-from target_hotglue.client import HotglueSink
+from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
+from hotglue_singer_sdk.target_sdk.client import HotglueSink
 
 
 class PrecoroSink(HotglueSink):
