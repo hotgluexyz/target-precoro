@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "target-precoro"
 version = "0.0.1"
-description = "`target-precoro` is a Singer target for Precoro, built with the Meltano SDK for Singer Targets."
+description = "`target-precoro` is a Singer target for Precoro, built with the Hotglue Singer SDK."
 authors = ["Hotglue"]
 keywords = [
     "ELT",
@@ -12,8 +12,7 @@ license = "Apache 2.0"
 [tool.poetry.dependencies]
 python = "<3.11,>=3.7.1"
 requests = "^2.25.1"
-singer-sdk = "^0.9.0"
-target-hotglue = "^0.0.4"
+hotglue-singer-sdk = "^1.0.40"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
