@@ -121,7 +121,7 @@ class FallbackSink(PrecoroSink):
         invoice = invoices[0]
         remaining_amount = invoice.get("sum", 0) - float(invoice.get("sumPaid", 0))
         if abs(round((remaining_amount - record.get("sumPaid")), 2)) <= 0.01:
-            record["sumPaid"] = remaining_amount
+            record["sumPaid"] = round(remaining_amount, 2)
 
     def upsert_record(self, record: dict, context: dict):
         state_updates = dict()
