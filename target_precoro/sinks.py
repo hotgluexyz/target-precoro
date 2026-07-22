@@ -162,6 +162,7 @@ class FallbackSink(PrecoroSink):
             # Precoro's payments endpoint doesn't support PUT. Existing
             # payments must not be updated, so mark them as existing and skip the request.
             if id and self.name == "payments":
+                id = int(id)
                 self.logger.info(f"Skipping update for existing payment with id {id}")
                 state_updates["existing"] = True
                 return id, True, state_updates
