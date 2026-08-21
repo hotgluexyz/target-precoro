@@ -14,6 +14,7 @@ class ItemCustomFieldsSink(PrecoroSink):
 
     @property
     def endpoint(self):
+        #POST WORKS, GET DOESN'T
         return f"/{self.stream_name}/custom_field_id/options"
     
     def preprocess_record(self, record: dict, context: dict) -> None:

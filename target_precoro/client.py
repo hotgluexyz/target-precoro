@@ -397,7 +397,10 @@ class PrecoroSink(HotglueSink):
             return None
 
         try:
-            response = self.request_api("GET", endpoint=base_endpoint)
+            #this function is only called by the itemcustomfields sink;
+            #we can safely assume the endpoint ends with /options
+            get_endpoint = base_endpoint[: -len("/options")]
+            response = self.request_api("GET", endpoint=get_endpoint)
             options = response.json().get("data", [])
             for option in options:
                 if str(option.get("externalId")) == str(external_id):
@@ -441,7 +444,13 @@ class PrecoroSink(HotglueSink):
         if base_endpoint not in cache_store:
             options_by_key = {}
             try:
-                response = self.request_api("GET", endpoint=base_endpoint)
+                if base_endpoint.endswith("/options"):
+                    #documentcustomfields and itemcustomfields;
+                    #both GET endpoints do not have the /options suffix
+                    get_endpoint = base_endpoint[: -len("/options")]
+                else:
+                    get_endpoint = base_endpoint
+                response = self.request_api("GET", endpoint=get_endpoint)
                 for option in response.json().get("data", []):
                     key = self._option_catalog_key(option.get("code"), option.get("name"))
                     option_id = option.get("id")
