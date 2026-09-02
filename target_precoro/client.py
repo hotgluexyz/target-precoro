@@ -396,17 +396,19 @@ class PrecoroSink(HotglueSink):
         if not base_endpoint or not external_id:
             return None
 
+        detail_endpoint = base_endpoint.rsplit("/options", 1)[0]
         try:
-            response = self.request_api("GET", endpoint=base_endpoint)
-            options = response.json().get("data", [])
-            for option in options:
+            response = self.request_api("GET", endpoint=detail_endpoint)
+            options = response.json().get("options", {}).get("data", [])
+            options_iter = options.values() if isinstance(options, dict) else options
+            for option in options_iter:
                 if str(option.get("externalId")) == str(external_id):
                     option_id = option.get("id")
                     return str(option_id) if option_id is not None else None
         except Exception as exc:
             self.logger.warning(
                 f"Failed to lookup existing custom field option for externalId {external_id} "
-                f"at {base_endpoint}: {exc}"
+                f"at {detail_endpoint}: {exc}"
             )
         return None
 
@@ -439,16 +441,19 @@ class PrecoroSink(HotglueSink):
                 setattr(target, "_option_catalog_cache", cache_store)
 
         if base_endpoint not in cache_store:
+            detail_endpoint = base_endpoint.rsplit("/options", 1)[0]
             options_by_key = {}
             try:
-                response = self.request_api("GET", endpoint=base_endpoint)
-                for option in response.json().get("data", []):
+                response = self.request_api("GET", endpoint=detail_endpoint)
+                options = response.json().get("options", {}).get("data", [])
+                options_iter = options.values() if isinstance(options, dict) else options
+                for option in options_iter:
                     key = self._option_catalog_key(option.get("code"), option.get("name"))
                     option_id = option.get("id")
                     if key and option_id is not None:
                         options_by_key[key] = str(option_id)
             except Exception as exc:
-                raise Exception(f"Failed to list existing options at {base_endpoint}: {exc}") from exc
+                raise Exception(f"Failed to list existing options at {detail_endpoint}: {exc}") from exc
             cache_store[base_endpoint] = options_by_key
 
         return cache_store[base_endpoint]
