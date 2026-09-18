@@ -219,6 +219,7 @@ class FallbackSink(PrecoroSink):
                 endpoint = f"{base_endpoint}/{id}"
                 if self.name == "suppliers":
                     self.merge_supplier_currencies(record, id)
+                    self.merge_supplier_legal_entities(record, id)
             if self.name == "documentcustomfields" and "enable" not in record:
                 # Precoro's option PUT treats a missing "enable" as "disable" rather
                 # than "leave unchanged" (confirmed: PUT without it flips an active

@@ -320,12 +320,14 @@ class PrecoroSink(HotglueSink):
         """Centralize AccountSetup preprocessing for record upserts."""
         external_id = record.pop("externalId", None)
         legal_entity_id = record.pop("legalEntityId", None)
+        is_parent_category = bool(record.pop("isParentCategory", False))
         account_setup_enabled = self.is_account_setup_enabled(external_id, legal_entity_id)
 
         context = {
             "source_external_id": external_id,
             "external_id": external_id,
             "legal_entity_id": legal_entity_id,
+            "is_parent_category": is_parent_category,
             "account_setup_enabled": account_setup_enabled,
             "account_setup_ref_id": None,
             "all_legal_entity_ids": [],
@@ -391,6 +393,41 @@ class PrecoroSink(HotglueSink):
             if currency and currency not in merged:
                 merged.append(currency)
         record["currencies[]"] = merged
+
+    def _get_existing_supplier_legal_entity_ids(self, supplier_id) -> list[str]:
+        try:
+            response = self.request_api("GET", endpoint=f"/suppliers/{supplier_id}")
+            data = response.json()
+        except Exception as exc:
+            self.logger.warning(f"Failed to fetch existing supplier {supplier_id} for legal entity merge: {exc}")
+            return []
+        if not isinstance(data, dict):
+            return []
+        entities = (data.get("supplierLegalEntities") or {}).get("data", [])
+        if not isinstance(entities, list):
+            return []
+        legal_entity_ids = []
+        for entity in entities:
+            legal_entity = (entity or {}).get("legalEntity") or {}
+            legal_entity_id = legal_entity.get("id")
+            if legal_entity_id is not None:
+                legal_entity_ids.append(str(legal_entity_id))
+        return legal_entity_ids
+
+    def merge_supplier_legal_entities(self, record: dict, supplier_id) -> None:
+        """Merge AccountSetup's legal entities into the existing list instead of replacing it --
+        a legal entity added directly in Precoro is invisible to AccountSetup and would get
+        silently dropped on overwrite."""
+        incoming = record.get("supplierLegalEntityIds[]")
+        if incoming is None:
+            return
+
+        incoming_list = incoming if isinstance(incoming, list) else [incoming]
+        merged = list(self._get_existing_supplier_legal_entity_ids(supplier_id))
+        for legal_entity_id in incoming_list:
+            if legal_entity_id and legal_entity_id not in merged:
+                merged.append(legal_entity_id)
+        record["supplierLegalEntityIds[]"] = merged
 
     def find_custom_field_option_id(self, base_endpoint: str, external_id: str):
         if not base_endpoint or not external_id:
@@ -529,6 +566,10 @@ class PrecoroSink(HotglueSink):
     def apply_account_setup_dependencies(self, context: dict, precoro_id) -> None:
         """Apply extra Precoro dependency updates required by AccountSetup flows."""
         if not context.get("account_setup_enabled") or not self._is_custom_field_option_stream():
+            return
+
+        if context.get("is_parent_category"):
+            # Shared category option (e.g. GL account parent) -- skip Precoro-side depend_add, but AccountSetup registration above still runs.
             return
 
         legal_entity_ids = self._get_account_setup_legal_entity_ids(context)
